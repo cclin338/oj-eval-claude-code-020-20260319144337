@@ -61,12 +61,27 @@ static void *block_idx_to_addr(int idx, int rank) {
     return (void *)((uintptr_t)base_addr + offset);
 }
 
-// Set block status
-static void set_block_status(void *addr, int rank, int allocated) {
+// Set block status: value > 0 allocated, < 0 free, == 0 clear
+static void set_block_status_value(void *addr, int rank, char value) {
     int idx = addr_to_block_idx(addr, rank);
     if (idx >= 0 && block_status[rank]) {
-        block_status[rank][idx] = allocated ? rank : -rank;
+        block_status[rank][idx] = value;
     }
+}
+
+// Helper: mark as allocated
+static void mark_allocated(void *addr, int rank) {
+    set_block_status_value(addr, rank, rank);
+}
+
+// Helper: mark as free
+static void mark_free(void *addr, int rank) {
+    set_block_status_value(addr, rank, -rank);
+}
+
+// Helper: clear status (block doesn't exist at this rank)
+static void clear_block_status(void *addr, int rank) {
+    set_block_status_value(addr, rank, 0);
 }
 
 // Get block status
@@ -122,7 +137,7 @@ int init_page(void *p, int pgcount) {
         FreeBlock *block = (FreeBlock *)block_addr;
         block->next = free_lists[current_rank];
         free_lists[current_rank] = block;
-        set_block_status(block_addr, current_rank, 0);  // Free
+        mark_free(block_addr, current_rank);  // Free
     }
 
     return OK;
@@ -152,7 +167,7 @@ void *alloc_pages(int rank) {
         void *block_addr = (void *)block;
 
         // Clear status for this block (it's being split)
-        set_block_status(block_addr, current_rank, 0);
+        clear_block_status(block_addr, current_rank);
 
         // Split block into two buddies
         int buddy_rank = current_rank - 1;
@@ -167,8 +182,8 @@ void *alloc_pages(int rank) {
         free_lists[buddy_rank] = b1;
 
         // Set status for both buddies as free
-        set_block_status(buddy1, buddy_rank, 0);
-        set_block_status(buddy2, buddy_rank, 0);
+        mark_free(buddy1, buddy_rank);
+        mark_free(buddy2, buddy_rank);
 
         current_rank--;
     }
@@ -179,7 +194,7 @@ void *alloc_pages(int rank) {
     alloc_addr = (void *)block;
 
     // Mark as allocated
-    set_block_status(alloc_addr, rank, 1);
+    mark_allocated(alloc_addr, rank);
 
     return alloc_addr;
 }
@@ -210,7 +225,7 @@ int return_pages(void *p) {
     }
 
     // Mark as free
-    set_block_status(p, rank, 0);
+    clear_block_status(p, rank);
 
     // Add to free list
     FreeBlock *block = (FreeBlock *)p;
@@ -250,8 +265,8 @@ int return_pages(void *p) {
         remove_from_free_list(buddy, current_rank);
 
         // Clear their status
-        set_block_status(current_block, current_rank, 0);
-        set_block_status(buddy, current_rank, 0);
+        clear_block_status(current_block, current_rank);
+        clear_block_status(buddy, current_rank);
 
         // Merge into larger block
         int parent_rank = current_rank + 1;
@@ -263,7 +278,7 @@ int return_pages(void *p) {
         free_lists[parent_rank] = parent;
 
         // Set status as free
-        set_block_status(parent_block, parent_rank, 0);
+        mark_free(parent_block, parent_rank);
 
         // Continue merging
         current_block = parent_block;
