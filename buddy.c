@@ -42,17 +42,8 @@ static void *get_buddy(void *addr, int rank) {
 static void mark_block(void *addr, int rank, int allocated) {
     uintptr_t offset = (uintptr_t)addr - (uintptr_t)base_addr;
     int page_idx = offset / PAGE_SIZE;
-    int block_pages = get_blocks_per_page(rank);
-
-    // Mark first page only
+    // Mark first page only - other pages remain whatever (0)
     page_rank[page_idx] = allocated ? rank : -rank;
-
-    // Mark other pages as 0 (will be found via first page)
-    for (int i = 1; i < block_pages; i++) {
-        if (page_idx + i < total_pages) {
-            page_rank[page_idx + i] = 0;
-        }
-    }
 }
 
 static int find_block_rank(void *addr) {
